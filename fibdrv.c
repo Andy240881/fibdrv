@@ -26,19 +26,14 @@ static DEFINE_MUTEX(fib_mutex);
 
 static long long fib_sequence(long long k)
 {
-    /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
-    long long f[k + 2];
-
-    f[0] = 0;
-    f[1] = 1;
+    long long f[] = {0, 1};
 
     for (int i = 2; i <= k; i++) {
-        f[i] = f[i - 1] + f[i - 2];
+        f[(i & 1)] += f[((i - 1) & 1)];
     }
 
-    return f[k];
+    return f[(k & 1)];
 }
-
 static int fib_open(struct inode *inode, struct file *file)
 {
     if (!mutex_trylock(&fib_mutex)) {
@@ -69,7 +64,26 @@ static ssize_t fib_write(struct file *file,
                          size_t size,
                          loff_t *offset)
 {
-    return 1;
+    ktime_t kt;
+    if (buf)
+        return 1;
+    switch (size) {
+    case 0:
+        kt = ktime_get();
+        fib_sequence(*offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
+    // case 1:
+    //     kt = ktime_get();
+    //     fib_sequence_fdouble(*offset);
+    //     kt = ktime_sub(ktime_get(), kt);
+    //     break;
+    // case 2:
+    //     return ktime_to_ns(ktime_get());
+    default:
+        return 0;
+    }
+    return (ssize_t) ktime_to_ns(kt);
 }
 
 static loff_t fib_device_lseek(struct file *file, loff_t offset, int orig)
