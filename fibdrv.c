@@ -34,6 +34,47 @@ static long long fib_sequence(long long k)
 
     return f[(k & 1)];
 }
+static long long fib_sequence_fd(long long k)
+{
+    unsigned int h = 0;
+    uint64_t a = 0;
+    uint64_t b = 1;
+    for (unsigned int i = k; i; ++h, i >>= 1)
+        ;
+    for (unsigned int mask = 1U << (h - 1); mask; mask >>= 1) {
+        uint64_t t1 = a * (2 * b - a);  // fib(2m)
+        uint64_t t2 = b * b + a * a;    // fib(2m+1)
+        if (mask & k) {
+            a = t2;
+            b = t1 + t2;
+        } else {
+            a = t1;
+            b = t2;
+        }
+    }
+    return a;
+}
+static long long fib_sequence_fd_clz(long long k)
+{
+    if (k < 2)
+        return k;
+    unsigned int h = 0;
+    uint64_t a = 0;
+    uint64_t b = 1;
+    h = 31 - __builtin_clzll(k);
+    for (unsigned int mask = 1U << h; mask; mask >>= 1) {
+        uint64_t t1 = a * (2 * b - a);  // fib(2m)
+        uint64_t t2 = b * b + a * a;    // fib(2m+1)
+        if (mask & k) {
+            a = t2;
+            b = t1 + t2;
+        } else {
+            a = t1;
+            b = t2;
+        }
+    }
+    return a;
+}
 static int fib_open(struct inode *inode, struct file *file)
 {
     if (!mutex_trylock(&fib_mutex)) {
@@ -55,8 +96,10 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    return (ssize_t) fib_sequence_fd_clz(*offset);
 }
+static long long (*fib_methods[])(long long) = {fib_sequence, fib_sequence_fd,
+                                                fib_sequence_fd_clz};
 
 /* write operation is skipped */
 static ssize_t fib_write(struct file *file,
@@ -67,23 +110,11 @@ static ssize_t fib_write(struct file *file,
     ktime_t kt;
     if (buf)
         return 1;
-    switch (size) {
-    case 0:
-        kt = ktime_get();
-        fib_sequence(*offset);
-        kt = ktime_sub(ktime_get(), kt);
-        break;
-    // case 1:
-    //     kt = ktime_get();
-    //     fib_sequence_fdouble(*offset);
-    //     kt = ktime_sub(ktime_get(), kt);
-    //     break;
-    // case 2:
-    //     return ktime_to_ns(ktime_get());
-    default:
-        return 0;
+    kt = ktime_get();
+    for (int i = 0; i < 10; i++) {
+        fib_methods[size](*offset);
     }
-    return (ssize_t) ktime_to_ns(kt);
+    return (ssize_t) ktime_to_ns(ktime_sub(ktime_get(), kt));
 }
 
 static loff_t fib_device_lseek(struct file *file, loff_t offset, int orig)
